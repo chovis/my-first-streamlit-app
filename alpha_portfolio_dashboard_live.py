@@ -58,10 +58,29 @@ df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
 pivot_ret = df.pivot(index='Year', columns='Quarter', values='Quarter_Return_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 
+#ch @st.cache_data(ttl=3600)
+#ch def get_spy_value():
+    #ch spy = yf.download('SPY', start='2019-12-01', progress=False)['Adj Close']
+    #ch spy = spy.reindex(df['Date'], method='nearest')
+    #ch  spy_initial = spy.iloc[0]
+    #ch return initial * (spy / spy_initial)
+
 @st.cache_data(ttl=3600)
 def get_spy_value():
-    spy = yf.download('SPY', start='2019-12-01', progress=False)['Adj Close']
-    spy = spy.reindex(df['Date'], method='nearest')
+    # Download and handle single-ticker case
+    data = yf.download('SPY', start='2019-12-01', progress=False, auto_adjust=True)
+    if data.empty:
+        st.error("SPY data not available. Using placeholder.")
+        return [initial] * len(df)
+    
+    # Extract adjusted close safely
+    if isinstance(data.columns, pd.MultiIndex):
+        spy = data['Close'].iloc[:, 0]  # MultiIndex case
+    else:
+        spy = data['Close']  # Single ticker case
+    
+    # Reindex to match rebalance dates
+    spy = spy.reindex(df['Date'], method='nearest').fillna(method='ffill')
     spy_initial = spy.iloc[0]
     return initial * (spy / spy_initial)
 
