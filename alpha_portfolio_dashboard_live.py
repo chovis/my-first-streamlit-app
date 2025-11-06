@@ -153,32 +153,53 @@ def get_live_data(tickers):
 price_data, live_df = get_live_data(all_tickers)
 st.dataframe(live_df.style.format({"Price": "${:.2f}", "Change %": "{:.2f}%", "Volume": "{:,}"}))
 
-# --- Live since rebalance (robust) ---
+# --- Live since rebalance (fully robust) ---
 last_date = pd.to_datetime(selected_date)
 
-# Find the closest available date on or before the rebalance
-available_dates = price_data.index
-if last_date not in available_dates:
-    # Use the nearest earlier date
-    earlier_dates = available_dates[available_dates <= last_date]
-    if earlier_dates.empty:
-        st.warning("No price data before rebalance date – skipping live estimate.")
+# Ensure price_data is a proper DataFrame with tickers as columns
+if isinstance(price_data.columns, pd.MultiIndex):
+    # Multi-ticker: extract Close level
+    close_data = price_data['Close']
+else:
+    close_data = price_data.copy()
+
+# Drop any tickers with all NaN
+close_data = close_data.dropna(axis=1, how='all')
+
+if close_data.empty:
+    st.warning("No valid price data for selected rebalance date.")
+    port_return_since = 0.0
+else:
+    # Find nearest prior trading day with data
+    available_dates = close_data.index
+    prior_dates = available_dates[available_dates <= last_date]
+    if prior_dates.empty:
+        base_date = available_dates[0]  # fallback to earliest
+    else:
+        base_date = prior_dates[-1]
+
+    # Get base and latest prices
+    base_prices = close_data.loc[base_date]
+    latest_prices = close_data.iloc[-1]
+
+    # Align weights with available tickers
+    valid_tickers = close_data.columns
+    valid_weights = [w for t, w in zip(all_tickers, weights) if t in valid_tickers]
+    valid_weights = np.array(valid_weights)
+    if len(valid_weights) == 0:
         port_return_since = 0.0
     else:
-        base_date = earlier_dates[-1]
-else:
-    base_date = last_date
-
-# Get base and latest prices
-base_prices = price_data.loc[base_date]
-latest_prices = price_data.iloc[-1]
-
-# Compute returns safely
-since_returns = (latest_prices / base_prices - 1).values
-port_return_since = np.average(since_returns, weights=weights) if len(since_returns) == len(weights) else 0.0
+        # Normalize weights
+        valid_weights = valid_weights / valid_weights.sum()
+        since_returns = (latest_prices[valid_tickers] / base_prices[valid_tickers] - 1).values
+        port_return_since = np.average(since_returns, weights=valid_weights)
 
 current_value_live = selected_row['Portfolio_Value'] * (1 + port_return_since)
-st.metric("Estimated Value (Live Since Rebalance)", f"${current_value_live:,.0f}", f"{port_return_since*100:.2f}%")
+st.metric(
+    "Estimated Value (Live Since Rebalance)",
+    f"${current_value_live:,.0f}",
+    f"{port_return_since*100:.2f}%"
+)
 
 col_h1, col_h2 = st.columns(2)
 with col_h1:
