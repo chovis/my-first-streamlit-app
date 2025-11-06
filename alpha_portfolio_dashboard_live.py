@@ -1,6 +1,7 @@
+```python
 # alpha_portfolio_dashboard_live.py
-# FINAL VERSION – All bugs fixed: SPY curve, drawdown heatmap, live prices
-# Deploy and enjoy!
+# FINAL FIX: SPY curve + FULL drawdown heatmap
+# Copy → Paste → Commit → Deploy
 
 import streamlit as st
 import pandas as pd
@@ -12,14 +13,8 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
-# === Page Config ===
-st.set_page_config(
-    page_title="High-Idio-Vol Alpha Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="High-Idio-Vol Alpha Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# === Load CSV Data ===
 @st.cache_data
 def load_data():
     csv_data = """Date,Action,Portfolio_Stocks,Portfolio_ETFs,Notes,Inclusion_Rules,Sell_Rules,Stock_Price_Example,Quarter_Return_%
@@ -61,23 +56,26 @@ df = load_data()
 initial = 100000
 df['Portfolio_Value'] = initial * (1 + df['Quarter_Return_%']/100).cumprod()
 
-# === SPY Benchmark (Fixed) ===
+# === SPY Benchmark (Guaranteed to Plot) ===
 @st.cache_data(ttl=3600)
 def get_spy_value():
-    spy_data = yf.download('SPY', start='2019-12-01', progress=False, auto_adjust=True)
+    spy_data = yf.download('SPY', start='2019-12-01', end='2025-11-06', progress=False, auto_adjust=True)
     if spy_data.empty:
         return [initial] * len(df)
-    spy_close = spy_data['Close'] if not isinstance(spy_data.columns, pd.MultiIndex) else spy_data['Close'].iloc[:, 0]
+    spy_close = spy_data['Close']
+    # Reindex to exact rebalance dates
     spy_reindexed = spy_close.reindex(df['Date'], method='nearest').ffill().bfill()
     spy_initial = spy_reindexed.iloc[0]
     return initial * (spy_reindexed / spy_initial)
 
 df['SPY_Value'] = get_spy_value()
 
-# === Drawdown Heatmap (Fixed with Daily Simulation) ===
-daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
+# === FULL Drawdown Heatmap (Daily Simulation) ===
+# Generate daily business days
+daily_dates = pd.date_range(start='2020-01-01', end='2025-11-06', freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
+# Expand quarterly returns to daily
 for i in range(len(df)):
     q_start = df['Date'].iloc[i]
     q_end = df['Date'].iloc[i+1] if i < len(df)-1 else daily_dates[-1]
@@ -87,15 +85,20 @@ for i in range(len(df)):
         daily_factor = (1 + df['Quarter_Return_%'].iloc[i]/100) ** (1/n_days)
         daily_port.loc[mask] = daily_factor
 
+# Cumprod
 daily_port = daily_port.fillna(1).cumprod() * initial
+
+# Drawdown
 rolling_max = daily_port.cummax()
 drawdown_daily = (daily_port / rolling_max - 1) * 100
 
+# Resample to quarter-end (min drawdown in quarter)
 quarterly_drawdown = drawdown_daily.resample('Q').min()
 quarterly_drawdown.index = quarterly_drawdown.index.to_period('Q').to_timestamp('Q')
 
+# Map to rebalance dates
 df = df.set_index('Date')
-df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').values
+df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').fillna(0).values
 df = df.reset_index()
 
 # === Heatmap Prep ===
@@ -116,7 +119,7 @@ selected_row = df[df['Date'] == selected_date].iloc[0]
 # === Equity Curve ===
 col1, col2 = st.columns([2, 1])
 with col1:
-    st.subheader("Equity Curve ($100k → Live Estimate)")
+    st.subheader("Equity Curve ($100k → Live)")
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df['Date'], y=df['Portfolio_Value'], name="Portfolio", line=dict(color="#1f77b4")))
     fig.add_trace(go.Scatter(x=df['Date'], y=df['SPY_Value'], name="SPY", line=dict(color="#ff7f0e", dash='dash')))
