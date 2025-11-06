@@ -119,17 +119,36 @@ weights = np.array(stock_weights + etf_weights)
 
 @st.cache_data(ttl=60)
 def get_live_data(tickers):
-    data = yf.download(tickers, period="5d", progress=False)['Adj Close']
+    # Download raw data (handles 1 or many tickers)
+    raw = yf.download(tickers, period="5d", progress=False, auto_adjust=True)
+
+    # ---- 1. Extract Close price safely ----
+    if raw.empty:
+        st.warning("No price data returned from yfinance.")
+        return pd.DataFrame(), pd.DataFrame()
+
+    if isinstance(raw.columns, pd.MultiIndex):
+        # Multi-ticker → column hierarchy (Ticker, Adj Close, …)
+        close_series = raw['Close']
+    else:
+        # Single ticker → flat columns
+        close_series = raw['Close']
+
+    # ---- 2. Build live-price table ----
     info = yf.Tickers(' '.join(tickers)).tickers
     rows = []
     for t in tickers:
-        ticker = info[t]
-        price = ticker.info.get('currentPrice') or ticker.info.get('regularMarketPrice') or data[t].iloc[-1]
-        change_pct = ticker.info.get('regularMarketChangePercent')
-        volume = ticker.info.get('volume')
-        rows.append({"Ticker": t, "Price": price, "Change %": change_pct, "Volume": volume})
-    df_live = pd.DataFrame(rows)
-    return data, df_live
+        try:
+            price = info[t].info.get('currentPrice') or info[t].info.get('regularMarketPrice')
+            change = info[t].info.get('regularMarketChangePercent')
+            volume = info[t].info.get('volume')
+        except Exception:
+            price = change = volume = None
+        rows.append({"Ticker": t, "Price": price, "Change %": change, "Volume": volume})
+    live_df = pd.DataFrame(rows)
+
+    # ---- 3. Return both the price series (for % since rebalance) and the table ----
+    return close_series, live_df
 
 price_data, live_df = get_live_data(all_tickers)
 st.dataframe(live_df.style.format({"Price": "${:.2f}", "Change %": "{:.2f}%", "Volume": "{:,}"}))
