@@ -1,4 +1,3 @@
-```python
 # alpha_portfolio_dashboard_live.py
 # FINAL FIX: SPY curve + FULL drawdown heatmap
 # Copy → Paste → Commit → Deploy
