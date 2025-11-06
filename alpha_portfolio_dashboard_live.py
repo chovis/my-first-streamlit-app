@@ -73,7 +73,7 @@ def get_spy_value():
 
 df['SPY_Value'] = get_spy_value()
 
-# === Drawdown (Fixed with Realistic Daily Simulation) ===
+# === Drawdown (Aligned to Rebalance Dates) ===
 daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
@@ -83,15 +83,16 @@ for i in range(len(df)):
     mask = (daily_dates >= q_start) & (daily_dates <= q_end)
     n_days = mask.sum()
     if n_days > 0:
-        daily_return = (1 + df['Quarter_Return_%'].iloc[i]/100) ** (1/n_days) - 1
-        daily_port.loc[mask] = 1 + daily_return
+        daily_factor = (1 + df['Quarter_Return_%'].iloc[i]/100) ** (1/n_days)
+        daily_port.loc[mask] = daily_factor
 
-daily_port = daily_port.ffill().fillna(1).cumprod() * initial
+daily_port = daily_port.fillna(1).cumprod() * initial
 
 rolling_max = daily_port.cummax()
 drawdown_daily = (daily_port / rolling_max - 1) * 100
 
-quarterly_drawdown = drawdown_daily.resample('Q').min()
+# Resample to *quarter start* (rebalance date)
+quarterly_drawdown = drawdown_daily.resample('QS').min()  # 'QS' = quarter start
 quarterly_drawdown.index = quarterly_drawdown.index.to_period('Q').to_timestamp('Q')
 
 df = df.set_index('Date')
