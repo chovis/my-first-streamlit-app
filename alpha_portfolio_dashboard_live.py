@@ -48,10 +48,39 @@ def load_data():
 
 df = load_data()
 
+# === Portfolio Value & Drawdown (daily simulation) ===
 initial = 100000
 df['Portfolio_Value'] = initial * (1 + df['Quarter_Return_%']/100).cumprod()
-df['Rolling_Max'] = df['Portfolio_Value'].cummax()
-df['Drawdown_%'] = (df['Portfolio_Value'] / df['Rolling_Max'] - 1) * 100
+
+# Generate daily business dates between first and last rebalance
+daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
+
+# Expand quarterly returns to daily (compound within quarter)
+daily_port = pd.Series(index=daily_dates, dtype=float)
+for i in range(len(df)):
+    q_start = df['Date'].iloc[i]
+    q_end = df['Date'].iloc[i+1] if i < len(df)-1 else daily_dates[-1]
+    mask = (daily_dates >= q_start) & (daily_dates <= q_end)
+    n_days = mask.sum()
+    if n_days > 0:
+        daily_return = (1 + df['Quarter_Return_%'].iloc[i]/100) ** (1/n_days) - 1
+        daily_port.loc[mask] = 1 + daily_return
+
+# Forward fill and cumprod
+daily_port = daily_port.fillna(1).cumprod() * initial
+
+# Compute drawdown
+rolling_max = daily_port.cummax()
+drawdown_daily = (daily_port / rolling_max - 1) * 100
+
+# Resample to quarter-end
+quarterly_drawdown = drawdown_daily.resample('Q').min()  # worst drawdown in quarter
+quarterly_drawdown.index = quarterly_drawdown.index.to_period('Q').to_timestamp('Q')
+
+# Map back to rebalance dates
+df = df.set_index('Date')
+df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').values
+df = df.reset_index()
 
 df['Year'] = df['Date'].dt.year
 df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
@@ -67,22 +96,20 @@ pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reinde
 
 @st.cache_data(ttl=3600)
 def get_spy_value():
-    # Download and handle single-ticker case
-    data = yf.download('SPY', start='2019-12-01', progress=False, auto_adjust=True)
-    if data.empty:
-        st.error("SPY data not available. Using placeholder.")
+    # Download SPY with enough history
+    spy_data = yf.download('SPY', start='2019-12-01', progress=False, auto_adjust=True)
+    if spy_data.empty:
+        st.error("SPY data unavailable – using flat benchmark.")
         return [initial] * len(df)
-    
-    # Extract adjusted close safely
-    if isinstance(data.columns, pd.MultiIndex):
-        spy = data['Close'].iloc[:, 0]  # MultiIndex case
-    else:
-        spy = data['Close']  # Single ticker case
-    
-    # Reindex to match rebalance dates
-    spy = spy.reindex(df['Date'], method='nearest').fillna(method='ffill')
-    spy_initial = spy.iloc[0]
-    return initial * (spy / spy_initial)
+
+    # Extract Close safely
+    spy_close = spy_data['Close'] if not isinstance(spy_data.columns, pd.MultiIndex) else spy_data['Close'].iloc[:, 0]
+
+    # Reindex to *exact* rebalance dates and forward-fill
+    spy_reindexed = spy_close.reindex(df['Date'], method='nearest').ffill().bfill()
+
+    spy_initial = spy_reindexed.iloc[0]
+    return initial * (spy_reindexed / spy_initial)
 
 df['SPY_Value'] = get_spy_value()
 
