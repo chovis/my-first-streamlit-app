@@ -153,9 +153,30 @@ def get_live_data(tickers):
 price_data, live_df = get_live_data(all_tickers)
 st.dataframe(live_df.style.format({"Price": "${:.2f}", "Change %": "{:.2f}%", "Volume": "{:,}"}))
 
+# --- Live since rebalance (robust) ---
 last_date = pd.to_datetime(selected_date)
-since_returns = (price_data.iloc[-1] / price_data.loc[last_date:last_date].iloc[0] - 1).values
-port_return_since = np.average(since_returns, weights=weights) if len(since_returns) > 0 else 0
+
+# Find the closest available date on or before the rebalance
+available_dates = price_data.index
+if last_date not in available_dates:
+    # Use the nearest earlier date
+    earlier_dates = available_dates[available_dates <= last_date]
+    if earlier_dates.empty:
+        st.warning("No price data before rebalance date – skipping live estimate.")
+        port_return_since = 0.0
+    else:
+        base_date = earlier_dates[-1]
+else:
+    base_date = last_date
+
+# Get base and latest prices
+base_prices = price_data.loc[base_date]
+latest_prices = price_data.iloc[-1]
+
+# Compute returns safely
+since_returns = (latest_prices / base_prices - 1).values
+port_return_since = np.average(since_returns, weights=weights) if len(since_returns) == len(weights) else 0.0
+
 current_value_live = selected_row['Portfolio_Value'] * (1 + port_return_since)
 st.metric("Estimated Value (Live Since Rebalance)", f"${current_value_live:,.0f}", f"{port_return_since*100:.2f}%")
 
