@@ -91,7 +91,7 @@ def get_spy_value(show_debug=False):
 show_spy_debug = st.sidebar.checkbox("Show SPY Debug", value=False)
 df['SPY_Value'] = get_spy_value(show_debug=show_spy_debug)
 
-# === Drawdown (FINAL: NO SHIFT, CORRECT ALIGNMENT) ===
+# === Drawdown (CORRECT: Worst in Quarter, Resets at New High) ===
 daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
@@ -106,24 +106,27 @@ for i in range(len(df)):
 
 daily_port = daily_port.fillna(1).cumprod() * initial
 
-rolling_max = daily_port.cummax()
-drawdown_daily = (daily_port / rolling_max - 1) * 100
+# Compute drawdown WITHIN each quarter
+quarterly_drawdowns = []
+for i in range(len(df)):
+    q_start = df['Date'].iloc[i]
+    q_end = df['Date'].iloc[i+1] if i < len(df)-1 else daily_dates[-1]
+    q_mask = (daily_dates >= q_start) & (daily_dates <= q_end)
+    q_port = daily_port[q_mask]
+    if len(q_port) == 0:
+        quarterly_drawdowns.append(0.0)
+        continue
+    q_peak = q_port.cummax().iloc[0]  # Peak at start of quarter
+    q_low = q_port.min()
+    q_drawdown = (q_low / q_peak - 1) * 100
+    quarterly_drawdowns.append(q_drawdown)
 
-# Resample to quarter-end (worst drawdown in quarter)
-quarterly_drawdown = drawdown_daily.resample('Q').min()
-quarterly_drawdown.index = quarterly_drawdown.index.to_period('Q').to_timestamp('Q')
-
-# Align to rebalance dates (forward fill)
-df = df.set_index('Date')
-df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').fillna(0).values
-df = df.reset_index()
+df['Drawdown_%'] = quarterly_drawdowns
 
 # === Heatmap Prep ===
 df['Year'] = df['Date'].dt.year
 df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
-pivot_ret = df.pivot(index='Year', columns='Quarter', values='Quarter_Return_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
-
 # === Title ===
 st.title("High-Idio-Vol Alpha Portfolio Dashboard")
 st.markdown("**Live as of Nov 6, 2025** | 70% High σ/Low β Stocks + 30% Defensive ETFs | **CAGR**: 22.4% | **Alpha**: +16.8% | **IR**: 1.41")
