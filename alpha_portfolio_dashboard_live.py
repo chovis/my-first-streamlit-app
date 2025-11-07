@@ -91,7 +91,7 @@ def get_spy_value(show_debug=False):
 show_spy_debug = st.sidebar.checkbox("Show SPY Debug", value=False)
 df['SPY_Value'] = get_spy_value(show_debug=show_spy_debug)
 
-# === Drawdown (FIXED: Aligned to Rebalance Quarter) ===
+# === Drawdown (CORRECT: Worst in Quarter, Aligned to Rebalance) ===
 daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
@@ -109,18 +109,20 @@ daily_port = daily_port.fillna(1).cumprod() * initial
 rolling_max = daily_port.cummax()
 drawdown_daily = (daily_port / rolling_max - 1) * 100
 
-# Resample to *quarter start* (rebalance date)
-quarterly_drawdown = drawdown_daily.resample('QS').min()  # 'QS' = quarter start
+# Resample to *quarter-end* (worst drawdown *in* the quarter)
+quarterly_drawdown = drawdown_daily.resample('Q').min()  # Q = quarter-end
 quarterly_drawdown.index = quarterly_drawdown.index.to_period('Q').to_timestamp('Q')
 
+# Shift forward by one rebalance to align with *next* rebalance date
+quarterly_drawdown = quarterly_drawdown.shift(-1)
+
 df = df.set_index('Date')
-df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').values
+df['Drawdown_%'] = quarterly_drawdown.reindex(df.index, method='ffill').fillna(0).values
 df = df.reset_index()
 
 # === Heatmap Prep ===
 df['Year'] = df['Date'].dt.year
 df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
-pivot_ret = df.pivot(index='Year', columns='Quarter', values='Quarter_Return_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 
 # === Title ===
