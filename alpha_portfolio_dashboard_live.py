@@ -123,10 +123,18 @@ for i in range(len(df)):
 
 df['Drawdown_%'] = quarterly_drawdowns
 
-# === Heatmap Prep ===
+# === Heatmap Prep (FIXED) ===
 df['Year'] = df['Date'].dt.year
 df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
-pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
+
+# Returns heatmap
+pivot_ret = df.pivot(index='Year', columns='Quarter', values='Quarter_Return_%')
+pivot_ret = pivot_ret.reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
+
+# Drawdown heatmap
+pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%')
+pivot_dd = pivot_dd.reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
+
 # === Title ===
 st.title("High-Idio-Vol Alpha Portfolio Dashboard")
 st.markdown("**Live as of Nov 6, 2025** | 70% High σ/Low β Stocks + 30% Defensive ETFs | **CAGR**: 22.4% | **Alpha**: +16.8% | **IR**: 1.41")
