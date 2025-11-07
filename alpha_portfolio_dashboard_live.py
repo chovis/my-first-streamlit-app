@@ -1,5 +1,5 @@
 # alpha_portfolio_dashboard_live.py
-# FINAL FIXED VERSION – SPY plots, drawdown heatmap full, all errors gone
+# FINAL VERSION – SPY plots, drawdown heatmap FIXED (no quarter lag), live prices, debug toggle
 
 import streamlit as st
 import pandas as pd
@@ -33,11 +33,11 @@ def load_data():
 2022-01-03,"Sell HIMS, Buy NOVA","CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,AMPY,KYTX","XLU,XLP,GLD",Consumer shift,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: NOVA solar contracts (Dec 2021)","HIMS: No Q4 guidance raise",NOVA: $28.40,-36.2%
 2022-04-01,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,AMPY,KYTX","XLU,XLP,GLD",Bear hold,"All pass: Defensive catalysts intact",N/A,VKTX: $15.20,+18.6%
 2022-07-01,"Sell APLD, Buy GME","CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,GME","XLU,XLP,GLD",Meme entry,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: GME e-comm pivot (Jun 2022)","APLD: No data center wins",GME: $125.60,+35.6%
-2022-10-01,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,GME","XLU,XLP,GLD",Biotech bottom,"All pass: Trial readouts pending",N/A,CRSP: $52.10,+29.8%
+2022-10-03,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,GME","XLU,XLP,GLD",Biotech bottom,"All pass: Trial readouts pending",N/A,CRSP: $52.10,+29.8%
 2023-01-03,"Sell AMPY, Buy PLTR","CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,PLTR","XLU,XLP,GLD",AI pivot,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: PLTR AI contracts (Dec 2022)","AMPY: No lease expansion",PLTR: $7.20,+11.3%
-2023-04-01,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,PLTR","XLU,XLP,GLD",Drug hype,"All pass: VKTX obesity data",N/A,VKTX: $38.90,+17.5%
-2023-07-01,"Sell GME, Buy BNTX","CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",Vaccine update,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: BNTX vaccine update","GME: No squeeze catalyst",BNTX: $110.40,+21.4%
-2023-10-01,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",Gene therapy,"All pass: Phase 3 timelines",N/A,NTLA: $32.10,+26.7%
+2023-04-03,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,PLTR","XLU,XLP,GLD",Drug hype,"All pass: VKTX obesity data",N/A,VKTX: $38.90,+17.5%
+2023-07-03,"Sell GME, Buy BNTX","CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",Vaccine update,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: BNTX vaccine update","GME: No squeeze catalyst",BNTX: $110.40,+21.4%
+2023-10-02,Hold,"CRSP,NTLA,NOVA,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",Gene therapy,"All pass: Phase 3 timelines",N/A,NTLA: $32.10,+26.7%
 2024-01-02,"Sell NOVA, Buy DOCU","CRSP,NTLA,DOCU,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",Contract growth,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: DOCU ARR (Dec 2023)","NOVA: No new solar deals",DOCU: $60.20,+13.9%
 2024-04-01,Hold,"CRSP,NTLA,DOCU,VKTX,PRAX,ARQT,KYTX,BNTX","XLU,XLP,GLD",AI/biotech,"All pass: AI + trial momentum",N/A,PLTR: $23.10,+10.2%
 2024-07-01,"Sell BNTX, Buy VALE","CRSP,NTLA,DOCU,VKTX,PRAX,ARQT,KYTX,VALE","XLU,XLP,GLD",Commodity shock,"1. σ > 35%; 2. β < 0.7; 3. Catalyst: VALE iron ore supply","BNTX: No vaccine catalyst",VALE: $11.50,+18.8%
@@ -60,20 +60,38 @@ df = load_data()
 initial = 100000
 df['Portfolio_Value'] = initial * (1 + df['Quarter_Return_%']/100).cumprod()
 
-# === SPY Benchmark ===
+# === SPY Benchmark (WITH DEBUG TOGGLE) ===
 @st.cache_data(ttl=3600)
-def get_spy_value():
-    spy_data = yf.download('SPY', start='2019-12-01', progress=False, auto_adjust=True)
-    if spy_data.empty:
+def get_spy_value(show_debug=False):
+    try:
+        spy_data = yf.download('SPY', start='2019-12-01', end='2025-11-07', progress=False, auto_adjust=True)
+        if spy_data.empty:
+            if show_debug:
+                st.warning("SPY data not available – using flat benchmark.")
+            return [initial] * len(df)
+        
+        spy_close = spy_data['Close'] if not isinstance(spy_data.columns, pd.MultiIndex) else spy_data['Close'].iloc[:, 0]
+        spy_reindexed = spy_close.reindex(df['Date'], method='nearest').ffill().bfill()
+        spy_initial = spy_reindexed.iloc[0]
+        spy_values = initial * (spy_reindexed / spy_initial)
+        
+        if show_debug:
+            st.write("### DEBUG: SPY Values (First 5 / Last 5)")
+            debug_df = pd.DataFrame({'Date': df['Date'], 'SPY_Value': spy_values})
+            st.dataframe(debug_df.head(5))
+            st.dataframe(debug_df.tail(5))
+        
+        return spy_values.tolist()
+    except Exception as e:
+        if show_debug:
+            st.error(f"SPY download failed: {e}")
         return [initial] * len(df)
-    spy_close = spy_data['Close'] if not isinstance(spy_data.columns, pd.MultiIndex) else spy_data['Close'].iloc[:, 0]
-    spy_reindexed = spy_close.reindex(df['Date'], method='nearest').ffill().bfill()
-    spy_initial = spy_reindexed.iloc[0]
-    return initial * (spy_reindexed / spy_initial)
 
-df['SPY_Value'] = get_spy_value()
+# === Toggle in Sidebar ===
+show_spy_debug = st.sidebar.checkbox("Show SPY Debug", value=False)
+df['SPY_Value'] = get_spy_value(show_debug=show_spy_debug)
 
-# === Drawdown (Aligned to Rebalance Dates) ===
+# === Drawdown (FIXED: Aligned to Rebalance Quarter) ===
 daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
@@ -117,10 +135,10 @@ selected_row = df[df['Date'] == selected_date].iloc[0]
 # === Equity Curve ===
 col1, col2 = st.columns([2, 1])
 with col1:
-    st.subheader("Equity Curve ($100k → Live Estimate")
+    st.subheader("Equity Curve ($100k → Live Estimate)")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['Portfolio_Value'], name="Portfolio", line=dict(color="#1f77b4")))
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['SPY_Value'], name="SPY", line=dict(color="#ff7f0e", dash='dash')))
+    fig.add_trace(go.Scatter(x=df['Date'], y=df['Portfolio_Value'], name="Portfolio", line=dict(color="#1f77b4", width=3)))
+    fig.add_trace(go.Scatter(x=df['Date'], y=df['SPY_Value'], name="SPY", line=dict(color="#ff7f0e", width=2, dash='dash')))
     fig.update_layout(height=500, xaxis_title="Date", yaxis_title="Value ($)")
     st.plotly_chart(fig, use_container_width=True)
 
