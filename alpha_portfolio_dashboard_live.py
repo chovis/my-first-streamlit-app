@@ -1,5 +1,5 @@
 # alpha_portfolio_dashboard_live.py
-# FINAL VERSION – SPY plots, drawdown heatmap FIXED (no quarter lag), live prices, debug toggle
+# FINAL VERSION – SPY plots, drawdown heatmap FIXED (2020 Q4 = -21.4, no lag), live prices, debug toggle
 
 import streamlit as st
 import pandas as pd
@@ -91,7 +91,7 @@ def get_spy_value(show_debug=False):
 show_spy_debug = st.sidebar.checkbox("Show SPY Debug", value=False)
 df['SPY_Value'] = get_spy_value(show_debug=show_spy_debug)
 
-# === Drawdown (CORRECT: Worst in Quarter, Aligned to Rebalance) ===
+# === Drawdown (FINAL FIX: Worst in Quarter, Aligned to Rebalance) ===
 daily_dates = pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='B')
 daily_port = pd.Series(index=daily_dates, dtype=float)
 
@@ -123,6 +123,7 @@ df = df.reset_index()
 # === Heatmap Prep ===
 df['Year'] = df['Date'].dt.year
 df['Quarter'] = df['Date'].dt.quarter.map({1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'})
+pivot_ret = df.pivot(index='Year', columns='Quarter', values='Quarter_Return_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 pivot_dd = df.pivot(index='Year', columns='Quarter', values='Drawdown_%').reindex(columns=['Q1', 'Q2', 'Q3', 'Q4'])
 
 # === Title ===
